@@ -22,6 +22,7 @@ class TTY:
 class Loop:
     def __init__(self):
         self.reads = set()
+        self.buf = bytes(0x1000)
     @staticmethod
     def default_loop():
         return default_loop
@@ -32,7 +33,8 @@ class Loop:
             results = select.select(rfds,(),(),None)
             for fd in results[0]:
                 if fd in lookup:
-                    lookup[fd].onRead(lookup[fd],os.read(fd,0x100),None)
+                    num, addr = socket.recvfrom_into(self.buf,0x1000)
+                    lookup[fd].onRead(lookup[fd],addr,None,self.buf[:num],None)
 
 
 class Signal:

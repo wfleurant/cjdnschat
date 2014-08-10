@@ -1,5 +1,5 @@
 try:
-    import pyuva
+    import pyuv
 except ImportError:
     print("PYUV not installed! We needs it for sane networking operations! Run [pip3 install pyuv] as root please.")
     import derpyuv as pyuv
@@ -16,16 +16,60 @@ whitespace = re.compile("\\s+")
 def maybeAlias(who):
     return who
 
+class UDPInfo:
+    low = 0
+    high = 65528
+    curr = 65527
+
+class Types:
+    FULL = 0
+    END = 0 # same as FULL but eh w/ev
+    START = 1
+    CONTINUE = 2
+    # FILE = 3 etc...
+
+# as messages may be bigger than 65K (quite an essay, but still possible)
+# we need a superset fragmentation scheme, in addition to the normal one which
+# maxes out at 65K. Redundant, but necessary...
+
 class CompleteSender:
+    started = False
     def __init__(self,proto,addr,message):
         self.message = message
         self.proto = proto
-        proto.send(addr,message)
-    def done(self,proto,status):
-        if status != 0:
-            logging.error("Sending failed! {}".format(status))
+        self.send()
+    def send(self):
+        message = self.message[:UDPInfo.curr-1]
+        if self.started:
+            if len(message) == len(self.message):
+                kind = Types.END
+            else:
+                kind = Types.CONTINUE
         else:
-            logging.debug("Message has been sent")
+            if len(message) == len(self.message):
+                kind = Types.FULL
+            else:
+                kind = Types.START
+        message = bytes([kind])+message
+        proto.send(addr,message,lambda proto,status: self.sent(proto,status,len(message)))
+    def sent(self,proto,status,message):
+        if status != 0:
+            # oops, UDP Info is wrong!
+            logging.error("Oops, tried to send a message piece too big!")
+            UDPInfo.high = num
+            UDPInfo.curr = int((UDPInfo.high +UDPInfo.low)/2)
+            self.send()
+        else:
+            self.message = self.message[num:]
+            UDPInfo.low = max(num,UDPInfo.low)
+            if self.message:
+                self.send()
+            else:
+                self.done()
+            if UDPInfo.low != UDPInfo.high + 1:
+                UDPInfo.curr = (UDPInfo.high + UDPInfo.low) / 2
+    def done(self):
+        logging.debug("Message has been sent")
 
 class Protocol(pyuv.UDP):
     def __init__(self,loop,addr,port):
@@ -55,7 +99,14 @@ class Protocol(pyuv.UDP):
         CompleteSender(super(),addr,message)
     def handle_message(self,who,message):
         self.lastAddr = who
-        print("<"+maybeAlias(who)+"> "+message.decode('utf-8'))
+        kind = message[0]
+        message = message[1:]
+        if kind == 0:
+            print("<"+maybeAlias(who)+"> "+message.decode('utf-8'))
+        elif kind == 1:
+            print("<"+maybeAlias(who)+"> file transfer initiate derp")
+        else
+            raise RuntimeError("What kind is {:d}?".format(kind))
 
 class ConsoleHandler(pyuv.TTY):
     def __init__(self,loop,protocol):
