@@ -1,4 +1,4 @@
-#include <string.h>
+#include <stdlib.h> // malloc
 
 #define NEW(a) malloc(sizeof(a))
 #define NEW0(a) calloc(1,sizeof(a))

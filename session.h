@@ -4,7 +4,7 @@
 struct session {
     uv_buf_t buf;
     uv_buf_t ringbuf;
-    const char* ident;
+    char* ident;
     bool refused;
 };
 

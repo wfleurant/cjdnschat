@@ -1,5 +1,16 @@
+#include "message.h"
+#include "check.h"
 #include "session.h"
 #include "new.h"
+
+#include <string.h> // memcpy
+#include <stdio.h>
+#include <assert.h>
+#include <signal.h>
+
+inline bool max(size_t a, size_t b) {
+    return a > b ? a : b;
+}
 
 static 
 void alloc(uv_handle_t* handle,
@@ -15,71 +26,66 @@ void alloc(uv_handle_t* handle,
     }
 }
 
-static void process_message(struct session* sess, uint8_t* cur, ssize_t size) {
-    switch(*cur) {
+static void process_message(struct session* sess, uv_buf_t message) {
+    fwrite(message.base,1,message.len,stdout);
+    printf(" process %d\n",message.len);
+    switch(*message.base) {
         case MESSAGE:
-            cur[size] = '\0';
-            printf("%s: %s\n",sess->ident, cur);
+            message.base[message.len+1] = '\0';
+            printf("%s: %s\n",sess->ident, message.base+1);
             break;
-        case STATUS:
+/*        case STATUS:
             cur[size] = '\0';
             printf("%s status %s\n",sess->ident, cur);
-            break;
+            break; */
         default:
-            printf("Unknown message %d\n",*cur);
+            printf("Unknown message %d\n",*message.base);
             break;
     };
-}
-
-static ssize_t read_message(struct session* sess, uint8_t* cur, size_t left) {
-    uint16_t msgsize = *((uint16_t*)cur);
-    if(msgsize == 0) return 2;
-
-    if(msgsize <= left) {
-        process_message(sess, cur,msgsize);
-        return msgsize + 2;
-    }
-    return 0;
 }
 
 static 
 void on_read(uv_stream_t* stream,
                            ssize_t nread,
                            const uv_buf_t* buf) {
-    struct session* sess = (struct session*)handle->data;
+    if(nread == UV_EOF) return;
+    if(nread == 0) return;
     CHECK(nread);
-    size_t old = sess->ringbuf.len;
-    sess->ringbuf.len = old + buf->len;
-    sess->ringbuf.base = realloc(sess->ringbuf.base,sess->ringbuf.len);
+    struct session* sess = (struct session*)stream->data;
 
-    uint8_t* cur = sess->ringbuf.base;
-    size_t left = sess->ringbuf.len;
+    ssize_t read_message(uv_buf_t buf) {
+        if(buf.len < 2) return 0;
+        uint16_t msgsize = ntohs(*((uint16_t*)buf.base));
+        printf("Got message %s %d %d\n",sess->ident,msgsize,buf.len);
+        if(msgsize == 0) return 2;
 
-    for(;;) {
-        uint8_t* next = read_message(sess, cur, left);
-        if(next) {
-            left -= (next - cur);
-            cur = next;
-        } else {
-            memcpy(sess->ringbuf.base,cur,left);
-            sess->ringbuf.base = realloc(sess->ringbuf.base,left);
-            sess->ringbuf.len = left;
+        if(msgsize + 2 <= buf.len) {
+            uv_buf_t message = { .base = buf.base + 2, .len = msgsize };
+            process_message(sess, message);
+            return msgsize + 2;
         }
+        return 0;
     }
+    
+    printf("got %d %c\n",nread, *buf->base);
+    uv_buf_t read = { .base = buf->base, .len = nread };
+    read_messages(&sess->ringbuf, read_message, read);
+    fwrite(sess->ringbuf.base,1,sess->ringbuf.len,stdout);
+    printf(" ringbuf %d\n",sess->ringbuf.len);
 }
 
 static void on_connect(uv_connect_t* req, int status) {
+    puts("boop");
     uv_stream_t* outgoing = req->handle;
     uv_loop_t* loop = req->data;
-    free(req);
 
-    struct sockaddr_in6 addr;
+    struct sockaddr_in6 addr = {};
     int len = sizeof(struct sockaddr_in6);
-    uv_tcp_getpeername(outgoing,&addr,len);
+    CHECK(uv_tcp_getpeername((uv_tcp_t*)outgoing,(struct sockaddr*)&addr,&len));
 
     struct session* sess = session_new(&addr);
     if(sess->refused) {
-        puts("add %s to your whitelist",sess->ident);
+        printf("add %s to your whitelist\n",sess->ident);
         free(sess);
         return;
     }
@@ -92,16 +98,16 @@ static void on_connection(uv_stream_t *server, int status) {
     uv_tcp_t* incoming = NEW(uv_tcp_t);
     uv_loop_t* loop = server->data;
     uv_tcp_init(loop,incoming);
-    CHECK(uv_accept(server,incoming));
+    CHECK(uv_accept(server,(uv_stream_t*)incoming));
 
     struct sockaddr_in6 addr;
     int len = sizeof(struct sockaddr_in6);
-    uv_tcp_getpeername(incoming,&addr,len);
+    uv_tcp_getpeername(incoming,(struct sockaddr*)&addr,&len);
     assert(len==sizeof(struct sockaddr_in6));
 
     struct session* sess = session_new(&addr);
     if(sess->refused) {
-        puts("session refused from %s",sess->ident);
+        printf("session refused from %s\n",sess->ident);
         free(sess);
         free(incoming);
         return;
@@ -110,32 +116,31 @@ static void on_connection(uv_stream_t *server, int status) {
     incoming->data = sess;
 
     terminal_setup(loop,incoming);
-    uv_read_start(incoming,alloc,on_read);
+    uv_read_start((uv_stream_t*)incoming,alloc,on_read);
 }
 
 
 int main(int argc, char**argv) {
+    signal(SIGPIPE,SIG_IGN);
     uv_loop_t* loop = uv_default_loop();
     session_setup();
     if(argc == 3) {
         struct sockaddr_in6 guy;
-        assert(inet_pton(PF_INET6,argv[1],&guy));
-        int rport = atoi(argv[2]);
-        assert(rport);
-        guy.sin6_port = htons(rport);
+        CHECK(uv_ip6_addr(argv[1],atoi(argv[2]),&guy));
 
         uv_connect_t req;
+        req.data = loop;
         uv_tcp_t handle;
-        uv_tcp_init(handle,loop);
-        uv_tcp_connect(&req,&handle, &guy, on_connect);
+        uv_tcp_init(loop, &handle);
+        uv_tcp_connect(&req, &handle, (struct sockaddr*)&guy, on_connect);
         puts("Connecting...");
         return uv_run(loop,UV_RUN_DEFAULT);
     }
 
     int port = 55555;
     if(getenv("port")) port = atoi(getenv("port"));
-    uv_interface_addr_t* ifa = NULL;
-    int naddr = 0
+    uv_interface_address_t* ifa = NULL;
+    int naddr = 0;
     CHECK(uv_interface_addresses(&ifa,&naddr));
     int i;
     for(i=0;i<naddr;++i) {
@@ -152,12 +157,14 @@ int main(int argc, char**argv) {
 
 
         char dst[INET6_ADDRSTRLEN];
-        assert(0==inet_ntop(AF_INET6, &ifa[i].address.address6,dst,INET6_ADDRSTRLEN));
-        printf("Tell your friend to run %s %s %s! Waiting for them to connect...\n",
-                argv[0],dst,ntohs(ifa[i].address.address6.sin6_port));
-        uv_tcp_bind(&handle, &ifa[i].address.address6);
-        uv_free_interface_addreses(ifa,naddr);
-        uv_listen((uv_stream_t*)&stream, 128, on_connection);
+        CHECK(uv_ip6_name(&ifa[i].address.address6,dst,INET6_ADDRSTRLEN));
+        printf("Tell your friend to run [ %s %s %d ]! Waiting for them to connect...\n",
+                argv[0],
+                dst,
+                ntohs(ifa[i].address.address6.sin6_port));
+        uv_tcp_bind(&handle, (struct sockaddr*)&ifa[i].address.address6, 0);
+        uv_free_interface_addresses(ifa,naddr);
+        uv_listen((uv_stream_t*)&handle, 128, on_connection);
 
         return uv_run(loop,UV_RUN_DEFAULT);
     }

@@ -1,4 +1,10 @@
 #include "session.h"
+#include "check.h"
+
+#include <assert.h>
+#include <stdlib.h> // getenv
+#include <netinet/in.h> // in6_addr
+#include <stdio.h>
 
 struct in6_addr* goodaddrs = NULL;
 ssize_t ngood = 0;
@@ -16,7 +22,7 @@ void session_setup(void) {
                 
                 ssize_t i = ngood;
                 ngood += 1;
-                goodaddrs = realloc(goodaddrs,sizeof(in6_addr)*ngood);
+                goodaddrs = realloc(goodaddrs,sizeof(struct in6_addr)*ngood);
                 inet_pton(PF_INET6, buf, goodaddrs + i);
                 for(;;) {
                     if(1 == fread(&nl,1,1,inp))
@@ -31,11 +37,12 @@ void session_setup(void) {
 struct session* session_new(struct sockaddr_in6* addr) {
     struct session* self = calloc(1,sizeof(struct session));
     char* dst = malloc(INET6_ADDRSTRLEN + 6);
-    assert(NULL != inet_ntop(PF_INET6, addr, dst, INET6_ADDRSTRLEN));
-    snprintf(dst+INET6_ADDRSTRLEN,6,":%d",ntohs(addr->sin6_port))
+    CHECK(uv_ip6_name(addr, dst, INET6_ADDRSTRLEN));
+    snprintf(dst+INET6_ADDRSTRLEN,6,":%d",ntohs(addr->sin6_port));
     self->ident = dst;
 
     if(goodaddrs) {
+        bool good = false;
         ssize_t i = 0;
         for(i=0;i<ngood;++i) {
             if(0 == memcmp(addr->sin6_addr,goodaddrs + i, sizeof(struct in6_addr))) {
@@ -44,7 +51,7 @@ struct session* session_new(struct sockaddr_in6* addr) {
             }
         }
         if(!good) {
-            sess->refused = true;
+            self->refused = true;
         }
     }
     return self;
