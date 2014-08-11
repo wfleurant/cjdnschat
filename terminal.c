@@ -31,7 +31,6 @@ static void process_message(uv_buf_t message) {
             uint8_t prefixbuf[3] = "";
             prefixbuf[2] = MESSAGE;
             *((uint16_t*)prefixbuf) = htons(message.len+1);
-            printf("sending message %d == %d\n",message.len+1,ntohs(*((uint16_t*)prefixbuf)));
             uv_buf_t bufs[2] = {
                 { .base = prefixbuf, .len = 3 },
                 message
@@ -46,11 +45,8 @@ static void process_message(uv_buf_t message) {
 uv_buf_t ringbuf = {};
 
 static ssize_t read_message(uv_buf_t buf) {
-    fwrite(ringbuf.base,1,ringbuf.len,stdout);
-    printf(" termbuf %d\n",ringbuf.len);
     char* nl = memchr(buf.base,'\n',buf.len);
     if(nl == NULL) return 0;
-    printf("nl? %d %d\n",nl-buf.base,buf.len);
     uv_buf_t message = { .base = buf.base, .len = nl-buf.base };
     process_message(message);
     return message.len + 1;

@@ -15,7 +15,6 @@ void read_messages(uv_buf_t* buf, ssize_t (*read_message)(uv_buf_t), uv_buf_t in
         cur.base += msgsize;
     }
     if(buf->base == cur.base) return;
-    printf("shortening to %d\n",cur.len);
     memcpy(buf->base,cur.base,cur.len);
     buf->len = cur.len;
     buf->base = realloc(buf->base,buf->len);

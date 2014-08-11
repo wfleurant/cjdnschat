@@ -27,8 +27,6 @@ void alloc(uv_handle_t* handle,
 }
 
 static void process_message(struct session* sess, uv_buf_t message) {
-    fwrite(message.base,1,message.len,stdout);
-    printf(" process %d\n",message.len);
     switch(*message.base) {
         case MESSAGE:
             message.base[message.len+1] = '\0';
@@ -56,7 +54,6 @@ void on_read(uv_stream_t* stream,
     ssize_t read_message(uv_buf_t buf) {
         if(buf.len < 2) return 0;
         uint16_t msgsize = ntohs(*((uint16_t*)buf.base));
-        printf("Got message %s %d %d\n",sess->ident,msgsize,buf.len);
         if(msgsize == 0) return 2;
 
         if(msgsize + 2 <= buf.len) {
@@ -67,15 +64,11 @@ void on_read(uv_stream_t* stream,
         return 0;
     }
     
-    printf("got %d %c\n",nread, *buf->base);
     uv_buf_t read = { .base = buf->base, .len = nread };
     read_messages(&sess->ringbuf, read_message, read);
-    fwrite(sess->ringbuf.base,1,sess->ringbuf.len,stdout);
-    printf(" ringbuf %d\n",sess->ringbuf.len);
 }
 
 static void on_connect(uv_connect_t* req, int status) {
-    puts("boop");
     uv_stream_t* outgoing = req->handle;
     uv_loop_t* loop = req->data;
 
