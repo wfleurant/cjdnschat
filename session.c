@@ -1,6 +1,7 @@
 #include "session.h"
 #include "check.h"
 
+#include <string.h>
 #include <assert.h>
 #include <stdlib.h> // getenv
 #include <netinet/in.h> // in6_addr
@@ -45,7 +46,7 @@ struct session* session_new(struct sockaddr_in6* addr) {
         bool good = false;
         ssize_t i = 0;
         for(i=0;i<ngood;++i) {
-            if(0 == memcmp(addr->sin6_addr,goodaddrs + i, sizeof(struct in6_addr))) {
+            if(0 == memcmp(&addr->sin6_addr,goodaddrs + i, sizeof(struct in6_addr))) {
                 good = true;
                 break;
             }
@@ -54,6 +55,8 @@ struct session* session_new(struct sockaddr_in6* addr) {
             self->refused = true;
         }
     }
+
+    self->shortident = self->ident + strlen(self->ident) - 4;
     return self;
 }
 

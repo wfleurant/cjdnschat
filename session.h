@@ -5,6 +5,7 @@ struct session {
     uv_buf_t buf;
     uv_buf_t ringbuf;
     char* ident;
+    const char* shortident;
     bool refused;
 };
 

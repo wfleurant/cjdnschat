@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+
 #include "message.h"
 #include "check.h"
 #include "session.h"
@@ -7,6 +9,7 @@
 #include <stdio.h>
 #include <assert.h>
 #include <signal.h>
+#include <stdbool.h>
 
 inline bool max(size_t a, size_t b) {
     return a > b ? a : b;
@@ -29,8 +32,10 @@ void alloc(uv_handle_t* handle,
 static void process_message(struct session* sess, uv_buf_t message) {
     switch(*message.base) {
         case MESSAGE:
-            message.base[message.len+1] = '\0';
-            printf("%s: %s\n",sess->ident, message.base+1);
+            {
+            char* msg = strndupa(message.base+1,message.len-1);
+            printf("%s: %s\n",sess->shortident, msg);
+            }
             break;
 /*        case STATUS:
             cur[size] = '\0';
@@ -79,11 +84,11 @@ static void on_connect(uv_connect_t* req, int status) {
     struct session* sess = session_new(&addr);
     if(sess->refused) {
         printf("add %s to your whitelist\n",sess->ident);
-        free(sess);
+        session_free(&sess);
         return;
     }
     outgoing->data = sess;
-    terminal_setup(loop, outgoing);
+    terminal_setup(loop, outgoing,false);
     uv_read_start(outgoing,alloc,on_read);
 }
 
@@ -101,14 +106,14 @@ static void on_connection(uv_stream_t *server, int status) {
     struct session* sess = session_new(&addr);
     if(sess->refused) {
         printf("session refused from %s\n",sess->ident);
-        free(sess);
+        session_free(&sess);
         free(incoming);
         return;
     }
 
     incoming->data = sess;
 
-    terminal_setup(loop,incoming);
+    terminal_setup(loop,incoming,true);
     uv_read_start((uv_stream_t*)incoming,alloc,on_read);
 }
 
